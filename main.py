@@ -23,7 +23,7 @@ GRAVITY = 20.0
 MAX_JUMP_HEIGHT = 1.0 # About the height of a block.
 # To derive the formula for calculating jump speed, first solve
 #    v_t = v_0 + a * t
-# for the time at which you achieve maximum height, where a is the acceleration
+# for the time at which you achieve maximum height, where A is the acceleration
 # due to gravity and v_t = 0. This gives:
 #    t = - v_0 / a
 # Use t and the desired MAX_JUMP_HEIGHT to solve for v_0 (jump speed) in
@@ -106,10 +106,10 @@ def normalize(position):
     """
     x, y, z = position
     x, y, z = (int(round(x)), int(round(y)), int(round(z)))
-    return (x, y, z)
+    return x, y, z
 
 
-def sectorize(position):
+def convert_to_sector(position):
     """ Returns a tuple representing the sector for the given `position`.
 
     Parameters
@@ -123,7 +123,7 @@ def sectorize(position):
     """
     x, y, z = normalize(position)
     x, y, z = x // SECTOR_SIZE, y // SECTOR_SIZE, z // SECTOR_SIZE
-    return (x, 0, z)
+    return x, 0, z
 
 
 class Model(object):
@@ -141,10 +141,10 @@ class Model(object):
         self.world = {}
 
         # Same mapping as `world` but only contains blocks that are shown.
-        self.shown = {}
+        self.shown_blocks = {}
 
-        # Mapping from position to a pyglet `VertextList` for all shown blocks.
-        self._shown = {}
+        # Mapping from position to a pyglet `VertexList` for all shown blocks.
+        self.shown_vertex_lists = {}
 
         # Mapping from sector to a list of positions inside that sector.
         self.sectors = {}
@@ -164,7 +164,7 @@ class Model(object):
         y = 0  # initial y height
         for x in xrange(-n, n + 1, s):
             for z in xrange(-n, n + 1, s):
-                # create a layer stone an grass everywhere.
+                # create a layer stone and grass everywhere.
                 self.add_block((x, y - 2, z), GRASS, immediate=False)
                 self.add_block((x, y - 3, z), STONE, immediate=False)
                 if x in (-n, n) or z in (-n, n):
@@ -212,10 +212,10 @@ class Model(object):
         dx, dy, dz = vector
         previous = None
         for _ in xrange(max_distance * m):
-            key = normalize((x, y, z))
-            if key != previous and key in self.world:
-                return key, previous
-            previous = key
+            block = normalize((x, y, z))
+            if block != previous and block in self.world:
+                return block, previous
+            previous = block
             x, y, z = x + dx / m, y + dy / m, z + dz / m
         return None, None
 
@@ -241,13 +241,13 @@ class Model(object):
             The coordinates of the texture squares. Use `tex_coords()` to
             generate.
         immediate : bool
-            Whether or not to draw the block immediately.
+            Whether to draw the block immediately.
 
         """
         if position in self.world:
             self.remove_block(position, immediate)
         self.world[position] = texture
-        self.sectors.setdefault(sectorize(position), []).append(position)
+        self.sectors.setdefault(convert_to_sector(position), []).append(position)
         if immediate:
             if self.exposed(position):
                 self.show_block(position)
@@ -261,13 +261,13 @@ class Model(object):
         position : tuple of len 3
             The (x, y, z) position of the block to remove.
         immediate : bool
-            Whether or not to immediately remove block from canvas.
+            Whether to immediately remove block from canvas.
 
         """
         del self.world[position]
-        self.sectors[sectorize(position)].remove(position)
+        self.sectors[convert_to_sector(position)].remove(position)
         if immediate:
-            if position in self.shown:
+            if position in self.shown_blocks:
                 self.hide_block(position)
             self.check_neighbors(position)
 
@@ -280,15 +280,15 @@ class Model(object):
         """
         x, y, z = position
         for dx, dy, dz in FACES:
-            key = (x + dx, y + dy, z + dz)
-            if key not in self.world:
+            block = (x + dx, y + dy, z + dz)
+            if block not in self.world:
                 continue
-            if self.exposed(key):
-                if key not in self.shown:
-                    self.show_block(key)
+            if self.exposed(block):
+                if block not in self.shown_blocks:
+                    self.show_block(block)
             else:
-                if key in self.shown:
-                    self.hide_block(key)
+                if block in self.shown_blocks:
+                    self.hide_block(block)
 
     def show_block(self, position, immediate=True):
         """ Show the block at the given `position`. This method assumes the
@@ -299,11 +299,11 @@ class Model(object):
         position : tuple of len 3
             The (x, y, z) position of the block to show.
         immediate : bool
-            Whether or not to show the block immediately.
+            Whether to show the block immediately.
 
         """
         texture = self.world[position]
-        self.shown[position] = texture
+        self.shown_blocks[position] = texture
         if immediate:
             self._show_block(position, texture)
         else:
@@ -326,9 +326,9 @@ class Model(object):
         texture_data = list(texture)
         # create vertex list
         # FIXME Maybe `add_indexed()` should be used instead
-        self._shown[position] = self.batch.add(24, GL_QUADS, self.group,
-            ('v3f/static', vertex_data),
-            ('t2f/static', texture_data))
+        self.shown_vertex_lists[position] = self.batch.add(24, GL_QUADS, self.group,
+                                                           ('v3f/static', vertex_data),
+                                                           ('t2f/static', texture_data))
 
     def hide_block(self, position, immediate=True):
         """ Hide the block at the given `position`. Hiding does not remove the
@@ -339,20 +339,20 @@ class Model(object):
         position : tuple of len 3
             The (x, y, z) position of the block to hide.
         immediate : bool
-            Whether or not to immediately remove the block from the canvas.
+            Whether to immediately remove the block from the canvas.
 
         """
-        self.shown.pop(position)
+        self.shown_blocks.pop(position)
         if immediate:
             self._hide_block(position)
         else:
             self._enqueue(self._hide_block, position)
 
     def _hide_block(self, position):
-        """ Private implementation of the 'hide_block()` method.
+        """ Private implementation of the hide_block() method.
 
         """
-        self._shown.pop(position).delete()
+        self.shown_vertex_lists.pop(position).delete()
 
     def show_sector(self, sector):
         """ Ensure all blocks in the given sector that should be shown are
@@ -360,7 +360,7 @@ class Model(object):
 
         """
         for position in self.sectors.get(sector, []):
-            if position not in self.shown and self.exposed(position):
+            if position not in self.shown_blocks and self.exposed(position):
                 self.show_block(position, False)
 
     def hide_sector(self, sector):
@@ -369,7 +369,7 @@ class Model(object):
 
         """
         for position in self.sectors.get(sector, []):
-            if position in self.shown:
+            if position in self.shown_blocks:
                 self.hide_block(position, False)
 
     def change_sectors(self, before, after):
@@ -436,7 +436,7 @@ class Window(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
         super(Window, self).__init__(*args, **kwargs)
 
-        # Whether or not the window exclusively captures the mouse.
+        # Whether the window exclusively captures the mouse.
         self.exclusive = False
 
         # When flying gravity has no effect and speed is increased.
@@ -465,7 +465,7 @@ class Window(pyglet.window.Window):
         # Which sector the player is currently in.
         self.sector = None
 
-        # The crosshairs at the center of the screen.
+        # The cross-hairs at the center of the screen.
         self.reticle = None
 
         # Velocity in the y (upward) direction.
@@ -478,6 +478,7 @@ class Window(pyglet.window.Window):
         self.block = self.inventory[0]
 
         # Convenience list of num keys.
+        # noinspection PyProtectedMember
         self.num_keys = [
             key._1, key._2, key._3, key._4, key._5,
             key._6, key._7, key._8, key._9, key._0]
@@ -494,6 +495,7 @@ class Window(pyglet.window.Window):
         # TICKS_PER_SEC. This is the main game event loop.
         pyglet.clock.schedule_interval(self.update, 1.0 / TICKS_PER_SEC)
 
+    # noinspection PyMethodOverriding
     def set_exclusive_mouse(self, exclusive):
         """ If `exclusive` is True, the game will capture the mouse, if False
         the game will ignore the mouse.
@@ -517,7 +519,7 @@ class Window(pyglet.window.Window):
         dy = math.sin(math.radians(y))
         dx = math.cos(math.radians(x - 90)) * m
         dz = math.sin(math.radians(x - 90)) * m
-        return (dx, dy, dz)
+        return dx, dy, dz
 
     def get_motion_vector(self):
         """ Returns the current motion vector indicating the velocity of the
@@ -531,6 +533,7 @@ class Window(pyglet.window.Window):
         """
         if any(self.strafe):
             x, y = self.rotation
+            # noinspection PyArgumentList
             strafe = math.degrees(math.atan2(*self.strafe))
             y_angle = math.radians(y)
             x_angle = math.radians(x + strafe)
@@ -556,7 +559,7 @@ class Window(pyglet.window.Window):
             dy = 0.0
             dx = 0.0
             dz = 0.0
-        return (dx, dy, dz)
+        return dx, dy, dz
 
     def update(self, dt):
         """ This method is scheduled to be called repeatedly by the pyglet
@@ -569,7 +572,7 @@ class Window(pyglet.window.Window):
 
         """
         self.model.process_queue()
-        sector = sectorize(self.position)
+        sector = convert_to_sector(self.position)
         if sector != self.sector:
             self.model.change_sectors(self.sector, sector)
             if self.sector is None:
@@ -702,7 +705,7 @@ class Window(pyglet.window.Window):
         if self.exclusive:
             m = 0.15
             x, y = self.rotation
-            x, y = x + dx * m, y + dy * m
+            x, y = x + dx * m, y + int(dy * m)
             y = max(-90, min(90, y))
             self.rotation = (x, y)
 
@@ -821,7 +824,7 @@ class Window(pyglet.window.Window):
 
     def draw_focused_block(self):
         """ Draw black edges around the block that is currently under the
-        crosshairs.
+        cross-hairs.
 
         """
         vector = self.get_sight_vector()
@@ -841,11 +844,11 @@ class Window(pyglet.window.Window):
         x, y, z = self.position
         self.label.text = '%02d (%.2f, %.2f, %.2f) %d / %d' % (
             pyglet.clock.get_fps(), x, y, z,
-            len(self.model._shown), len(self.model.world))
+            len(self.model.shown_vertex_lists), len(self.model.world))
         self.label.draw()
 
     def draw_reticle(self):
-        """ Draw the crosshairs in the center of the screen.
+        """ Draw the cross-hairs in the center of the screen.
 
         """
         glColor3d(0, 0, 0)
@@ -860,6 +863,7 @@ def setup_fog():
     # post-texturing color."
     glEnable(GL_FOG)
     # Set the fog color.
+    # noinspection PyCallingNonCallable,PyTypeChecker
     glFogfv(GL_FOG_COLOR, (GLfloat * 4)(0.5, 0.69, 1.0, 1))
     # Say we have no preference between rendering speed and quality.
     glHint(GL_FOG_HINT, GL_DONT_CARE)
